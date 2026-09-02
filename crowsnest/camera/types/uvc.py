@@ -7,13 +7,18 @@
 #### This File is distributed under GPLv3
 ####
 
+
 from __future__ import annotations
+
 
 import os
 from collections.abc import Sequence
 
+
 from ... import logger, v4l2
 from .. import camera
+
+
 
 
 class UVC(camera.Camera[dict[str, dict[str, list[str]]]]):
@@ -31,19 +36,24 @@ class UVC(camera.Camera[dict[str, dict[str, list[str]]]]):
             self.path_by_id = path
         self.query_controls = v4l2.ctl.get_query_controls(self.path)
 
+
         cur_sec = ""
         for name, qc in self.query_controls.items():
             parsed_qc: dict | None = v4l2.ctl.parse_qc_of_path(self.path, qc)
 
+
             if parsed_qc is None:
                 continue
+
 
             if not parsed_qc:
                 cur_sec = name
                 continue
 
+
             self.control_values[cur_sec][name] = parsed_qc
         self.formats = v4l2.ctl.get_formats(self.path)
+
 
     def get_formats_string(self) -> str:
         message = ""
@@ -56,8 +66,10 @@ class UVC(camera.Camera[dict[str, dict[str, list[str]]]]):
                     message += f"{indent * 2}{fps}\n"
         return message[:-1]
 
+
     def has_mjpg_hw_encoder(self) -> bool:
         return any("Motion-JPEG" in fmt for fmt in self.formats)
+
 
     def get_controls_string(self) -> str:
         message = ""
@@ -69,7 +81,8 @@ class UVC(camera.Camera[dict[str, dict[str, list[str]]]]):
                 line += max(0, 35 - len(line)) * " " + ":"
                 if data["type"] in ("int",):
                     line += f" min={data['min']} max={data['max']} step={data['step']}"
-                line += f" default={data['default']}"
+                if "default" in data:
+                    line += f" default={data['default']}"
                 line += f" value={self.get_current_control_value(control)}"
                 if "flags" in data:
                     line += f" flags={data['flags']}"
@@ -80,44 +93,3 @@ class UVC(camera.Camera[dict[str, dict[str, list[str]]]]):
             message += "\n"
         return message[:-1]
 
-    def set_control(self, control: str, value: int) -> bool:
-        return v4l2.ctl.set_control_with_qc(
-            self.path, self.query_controls[control], value
-        )
-
-    def get_current_control_value(self, control: str) -> int | None:
-        return v4l2.ctl.get_control_cur_value_with_qc(
-            self.path, self.query_controls[control]
-        )
-
-    @staticmethod
-    def get_avail_uvc(search_path: str) -> dict[str, str]:
-        avail_uvc: dict[str, str] = {}
-        if not os.path.exists(search_path):
-            return avail_uvc
-        for file in os.listdir(search_path):
-            dev_path = os.path.join(search_path, file)
-            if not os.path.islink(dev_path):
-                continue
-            real_path = os.path.realpath(dev_path)
-            if v4l2.ctl.get_formats(real_path):
-                avail_uvc[real_path] = dev_path
-        return avail_uvc
-
-    @classmethod
-    def init_camera_type(cls) -> Sequence[UVC]:
-        avail_by_id = cls.get_avail_uvc("/dev/v4l/by-id/")
-
-        avail_uvc_cameras = {
-            dev_path: {
-                "by_path": by_path,
-                "by_id": avail_by_id.get(dev_path, None),
-            }
-            for dev_path, by_path in cls.get_avail_uvc("/dev/v4l/by-path").items()
-            if "usb" in by_path
-        }
-
-        return [
-            UVC(dev_path, other=other_paths)
-            for dev_path, other_paths in avail_uvc_cameras.items()
-        ]
